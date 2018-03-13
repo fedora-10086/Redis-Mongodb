@@ -1,0 +1,853 @@
+   http://mp.weixin.qq.com/s/f4OI4iAWg6N482iUVMEYNg
+   
+    来源：码上青云
+
+    my.oschina.net/gaoenwei/blog/1623214
+
+
+本文目标
+
+
+    要在单台机器上搭建Redis集群，方式是通过不同的TCP端口启动多个实例，然后组成集群，同时记录在搭建过程中踩过的坑。
+
+
+安装准备
+
+
+    centos版本：6.7
+
+    redis版本：3.2.3
+
+    安装方式：源码安装
+
+    服务器：1台
+
+
+操作步骤
+
+
+此处默认已安装好单台redis
+
+ 
+1、启动Redis多个实例
+
+
+我们在Redis安装目录下创建目录cluster，并编写7000.conf~7005.conf 6个配置文件，这6个配置文件用来启动6个实例，后面将使用这6个实例组成集群。
+
+
+以7000.conf为例，配置文件需要填写如下几项：
+
+
+    port  7000                                        //端口7000,7001,7002,7003,7004,7005        
+
+    bind 192.168.186.91                                     //默认ip为127.0.0.1 需要改为其他节点机器可访问的ip 否则创建集群时无法访问对应的端口，无法创建集群
+
+    daemonize    yes                               //redis后台运行
+
+    pidfile  ./redis_7000.pid          //pidfile文件对应7000,7001,7002,7003,7004,7005
+
+    cluster-enabled  yes                           //开启集群  把注释#去掉
+
+    cluster-config-file  nodes_7000.conf   //集群的配置  配置文件首次启动自动生成 7000,7001,7002,7003,7004,7005
+
+    cluster-node-timeout  15000                //请求超时  默认15秒，可自行设置
+
+    appendonly  yes                           //aof日志开启  有需要就开启，它会每次写操作都记录一条日志
+
+
+分别启动6个实例
+
+
+    redis-server redis_cluster/7000/redis.conf
+
+    redis-server redis_cluster/7001/redis.conf
+
+    redis-server redis_cluster/7002/redis.conf
+
+    redis-server redis_cluster/7003/redis.conf
+
+    redis-server redis_cluster/7004/redis.conf
+
+    redis-server redis_cluster/7005/redis.conf
+
+
+启动成功后，看一下进程
+
+
+    # ps -ef | grep redis | grep cluster
+
+    idata    15711 22329  0 18:40 pts/10   00:00:00 ./bin/redis-server 192.168.186.91:7000 [cluster]
+
+    idata    15740 22329  0 18:40 pts/10   00:00:00 ./bin/redis-server 192.168.186.91:7001 [cluster]
+
+    idata    15810 22329  0 18:40 pts/10   00:00:00 ./bin/redis-server 192.168.186.91:7002 [cluster]
+
+    idata    17023 22329  0 18:42 pts/10   00:00:00 ./bin/redis-server 192.168.186.91:7003 [cluster]
+
+    idata    17030 22329  0 18:42 pts/10   00:00:00 ./bin/redis-server 192.168.186.91:7004 [cluster]
+
+    idata    17035 22329  0 18:42 pts/10   00:00:00 ./bin/redis-server 192.168.186.91:7005 [cluster]
+
+
+至此，ip=192.168.186.91机器上创建了6个实例，端口号为port=7000~7005。
+
+
+2、安装ruby
+
+
+1）yum安装ruby和依赖的包。
+
+
+    [root@itfirst redis_cluster]# yum -y install ruby ruby-devel rubygems rpm-build
+
+
+2）使用gem这个命令来安装redis接口
+
+
+    [root@itfirst redis_cluster]# gem install redis
+
+    ERROR:  Error installing redis:
+
+    redis requires Ruby version >= 2.2.2.
+
+
+这一步骤中出现了bug,度娘告诉我是Ruby版本太低，需要升级版本。
+
+
+3）升级Ruby的版本
+
+
+安装rvm，我不知道这是个什么东西，但是感觉像是Ruby的一个包管理器。
+
+
+    [root@itfirst redis_cluster]# curl -L get.rvm.io | bash -s stable
+
+      % Total    % Received % Xferd  Average Speed   Time    Time     Time  Current
+
+                                     Dload  Upload   Total   Spent    Left  Speed
+
+    100 24090  100 24090    0     0  10919      0  0:00:02  0:00:02 --:--:-- 91242
+
+    Downloading https://github.com/rvm/rvm/archive/1.29.3.tar.gz
+
+    Downloading https://github.com/rvm/rvm/releases/download/1.29.3/1.29.3.tar.gz.asc
+
+    gpg: 于 2017年09月11日 星期一 04时59分21秒 CST 创建的签名，使用 RSA，钥匙号 BF04FF17
+
+    gpg: 无法检查签名：No public key
+
+    Warning, RVM 1.26.0 introduces signed releases and automated check of signatures when GPG software found. Assuming you trust Michal Papis import the mpapis public key (downloading the signatures).
+
+     
+
+    GPG signature verification failed for '/usr/local/rvm/archives/rvm-1.29.3.tgz' - 'https://github.com/rvm/rvm/releases/download/1.29.3/1.29.3.tar.gz.asc'! Try to install GPG v2 and then fetch the public key:
+
+     
+
+        gpg2 --recv-keys 409B6B1796C275462A1703113804BB82D39DC0E3
+
+     
+
+    or if it fails:
+
+     
+
+        command curl -sSL https://rvm.io/mpapis.asc | gpg2 --import -
+
+     
+
+    the key can be compared with:
+
+     
+
+        https://rvm.io/mpapis.asc
+
+        https://keybase.io/mpapis
+
+     
+
+    NOTE: GPG version 2.1.17 have a bug which cause failures during fetching keys from remote server. Please downgrade or upgrade to newer version (if available) or use the second method described above.
+
+
+这一操作得到了：
+
+
+gpg2 –recv-keys 409B6B1796C275462A1703113804BB82D39DC0E3
+
+
+然后利用该密钥下载Ruby并升级。
+
+
+    [root@itfirst redis_cluster]# gpg --keyserver hkp://keys.gnupg.net --recv-keys 409B6B1796C275462A1703113804BB82D39DC0E3
+
+    gpg: 下载密钥‘D39DC0E3’，从 hkp 服务器 keys.gnupg.net
+
+    gpg: /root/.gnupg/trustdb.gpg：建立了信任度数据库
+
+    gpg: 密钥 D39DC0E3：公钥“Michal Papis (RVM signing) <mpapis@gmail.com>”已导入
+
+    gpg: 没有找到任何绝对信任的密钥
+
+    gpg: 合计被处理的数量：1
+
+    gpg:           已导入：1  (RSA: 1)
+
+    [root@itfirst redis_cluster]# curl -sSL https://get.rvm.io | bash -s stable
+
+    Downloading https://github.com/rvm/rvm/archive/1.29.3.tar.gz
+
+    Downloading https://github.com/rvm/rvm/releases/download/1.29.3/1.29.3.tar.gz.asc
+
+    gpg: 于 2017年09月11日 星期一 04时59分21秒 CST 创建的签名，使用 RSA，钥匙号 BF04FF17
+
+    gpg: 完好的签名，来自于“Michal Papis (RVM signing) <mpapis@gmail.com>”
+
+    gpg:               亦即“Michal Papis <mpapis@gmail.com>”
+
+    gpg:               亦即“[jpeg image of size 5015]”
+
+    gpg: 警告：这把密钥未经受信任的签名认证！
+
+    gpg:       没有证据表明这个签名属于它所声称的持有者。
+
+    主钥指纹： 409B 6B17 96C2 7546 2A17  0311 3804 BB82 D39D C0E3
+
+    子钥指纹： 62C9 E5F4 DA30 0D94 AC36  166B E206 C29F BF04 FF17
+
+    GPG verified '/usr/local/rvm/archives/rvm-1.29.3.tgz'
+
+    Creating group 'rvm'
+
+     
+
+    Installing RVM to /usr/local/rvm/
+
+    Installation of RVM in /usr/local/rvm/ is almost complete:
+
+     
+
+      * First you need to add all users that will be using rvm to 'rvm' group,
+
+        and logout - login again, anyone using rvm will be operating with `umask u=rwx,g=rwx,o=rx`.
+
+     
+
+      * To start using RVM you need to run `source /etc/profile.d/rvm.sh`
+
+        in all your open shell windows, in rare cases you need to reopen all shell windows.
+
+
+接着，source环境，让rvm可用。
+
+
+    [root@itfirst ~]# source /usr/local/rvm/scripts/rvm
+
+
+查看Ruby可用版本
+
+
+    [root@itfirst ~]# rvm list known
+
+    # MRI Rubies
+
+    [ruby-]1.8.6[-p420]
+
+    [ruby-]1.8.7[-head] # security released on head
+
+    [ruby-]1.9.1[-p431]
+
+    [ruby-]1.9.2[-p330]
+
+    [ruby-]1.9.3[-p551]
+
+    [ruby-]2.0.0[-p648]
+
+    [ruby-]2.1[.10]
+
+    [ruby-]2.2[.7]
+
+    [ruby-]2.3[.4]
+
+    [ruby-]2.4[.1]
+
+    ruby-head
+
+     
+
+    # for forks use: rvm install ruby-head-<name> --url https://github.com/github/ruby.git --branch 2.2
+
+     
+
+    # JRuby
+
+    jruby-1.6[.8]
+
+    jruby-1.7[.27]
+
+    jruby[-9.1.13.0]
+
+    jruby-head
+
+     
+
+    # Rubinius
+
+    rbx-1[.4.3]
+
+    rbx-2.3[.0]
+
+    rbx-2.4[.1]
+
+    rbx-2[.5.8]
+
+    rbx-3[.84]
+
+    rbx-head
+
+     
+
+    # Opal
+
+    opal
+
+     
+
+    # Minimalistic ruby implementation - ISO 30170:2012
+
+    mruby-1.0.0
+
+    mruby-1.1.0
+
+    mruby-1.2.0
+
+    mruby-1[.3.0]
+
+    mruby[-head]
+
+     
+
+    # Ruby Enterprise Edition
+
+    ree-1.8.6
+
+    ree[-1.8.7][-2012.02]
+
+     
+
+    # Topaz
+
+    topaz
+
+     
+
+    # MagLev
+
+    maglev[-head]
+
+    maglev-1.0.0
+
+     
+
+    # Mac OS X Snow Leopard Or Newer
+
+    macruby-0.10
+
+    macruby-0.11
+
+    macruby[-0.12]
+
+    macruby-nightly
+
+    macruby-head
+
+     
+
+    # IronRuby
+
+    ironruby[-1.1.3]
+
+    ironruby-head
+
+
+可以看到最新的版本是2.4.1，本文安装2.3.0
+
+
+至此，我们升级了Ruby的版本。
+
+
+    [root@itfirst ~]# rvm install 2.3.0
+
+    Searching for binary rubies, this might take some time.
+
+    Found remote file https://rvm_io.global.ssl.fastly.net/binaries/centos/6/x86_64/ruby-2.3.0.tar.bz2
+
+    Checking requirements for centos.
+
+    Installing requirements for centos.
+
+    Installing required packages: autoconf, automake, bison, libffi-devel, libtool, readline-devel, sqlite-devel, libyaml-devel..........
+
+    Requirements installation successful.
+
+    ruby-2.3.0 - #configure
+
+    ruby-2.3.0 - #download
+
+      % Total    % Received % Xferd  Average Speed   Time    Time     Time  Current
+
+                                     Dload  Upload   Total   Spent    Left  Speed
+
+    100 21.9M  100 21.9M    0     0   266k      0  0:01:24  0:01:24 --:--:--  278k
+
+    No checksum for downloaded archive, recording checksum in user configuration.
+
+    ruby-2.3.0 - #validate archive
+
+    ruby-2.3.0 - #extract
+
+    ruby-2.3.0 - #validate binary
+
+    ruby-2.3.0 - #setup
+
+    ruby-2.3.0 - #gemset created /usr/local/rvm/gems/ruby-2.3.0@global
+
+    ruby-2.3.0 - #importing gemset /usr/local/rvm/gemsets/global.gems..............................
+
+    ruby-2.3.0 - #generating global wrappers........
+
+    ruby-2.3.0 - #gemset created /usr/local/rvm/gems/ruby-2.3.0
+
+    ruby-2.3.0 - #importing gemsetfile /usr/local/rvm/gemsets/default.gems evaluated to empty gem list
+
+    ruby-2.3.0 - #generating default wrappers........
+
+
+4）安装gem redis接口
+
+
+    [root@itfirst ~]# rvm use 2.3.0
+
+    Using /usr/local/rvm/gems/ruby-2.3.0
+
+    [root@itfirst ~]# rvm remove 1.8.7
+
+    ruby-1.8.7-head - #already gone
+
+    Using /usr/local/rvm/gems/ruby-2.3.0
+
+    [root@itfirst ~]#  ruby --version
+
+    ruby 2.3.0p0 (2015-12-25 revision 53290) [x86_64-linux]
+
+    [root@itfirst ~]# gem install redis
+
+    Fetching: redis-4.0.1.gem (100%)
+
+    Successfully installed redis-4.0.1
+
+    Parsing documentation for redis-4.0.1
+
+    Installing ri documentation for redis-4.0.1
+
+    Done installing documentation for redis after 0 seconds
+
+    1 gem installed
+
+
+5）安装rubygems
+
+
+    # yum install -y rubygems
+
+
+到目前为止，我们的Ruby和运行redis-trib.rb需要的环境安装完成了。
+
+
+3、Redis集群搭建
+
+
+有了Ruby执行环境，可以开始将之前的6个实例组建成集群了。
+
+
+    redis-trib.rb  create  --replicas  1 192.168.186.91:7000 192.168.186.91:7001 192.168.186.91:7002 192.168.186.91:7003 192.168.186.91:7004 192.168.186.91:7005
+
+
+有三个master，有三个是slave。 后面跟上6个实例就好了，形式就是ip:port
+
+
+【此处有坑】
+
+
+第一坑
+
+
+    [root@itfirst src]# redis-trib.rb  create  --replicas  1 192.168.186.91:7000 192.168.186.91:7001 192.168.186.91:7002 192.168.186.91:7003 192.168.186.91:7004 192.168.186.91:7005
+
+    -bash: redis-trib.rb: command not found
+
+    [root@itfirst src]# cp redis-trib.rb /usr/local/bin
+
+
+需要将redis-trib.rb复制到/usr/local/bin目录下。
+
+
+第二坑
+
+
+    [root@itfirst bin]# redis-trib.rb  create  --replicas  1 192.168.186.91:7000 192.168.186.91:7001 192.168.186.91:7002 192.168.186.91:7003 192.168.186.91:7004 192.168.186.91:7005
+
+    >>> Creating cluster
+
+    [ERR] Node 192.168.186.91:7000 is not empty. Either the node already knows other nodes (check with CLUSTER NODES) or contains some key in database 0.
+
+
+踩完第一坑后，继续执行，发现了第二坑，还好有度娘，但是网上各种说法都有（主要参照了《极客on之路》的博客），发现错误的原因是redis数据库没有清除。
+
+
+    [root@itfirst src]# redis-cli -h 192.168.186.91 -p 7001
+
+    192.168.186.91:7001> flushdb
+
+    OK
+
+    192.168.186.91:7001> quit
+
+    [root@itfirst src]# redis-cli -h 192.168.186.91 -p 7002
+
+    192.168.186.91:7002> flushdb
+
+    OK
+
+    192.168.186.91:7002> quit
+
+    [root@itfirst src]# redis-cli -h 192.168.186.91 -p 7003
+
+    192.168.186.91:7003> flushdb
+
+    OK
+
+    192.168.186.91:7003> quit
+
+    [root@itfirst src]# redis-cli -h 192.168.186.91 -p 7004
+
+    192.168.186.91:7004> flushdb
+
+    OK
+
+    192.168.186.91:7004> quit
+
+    [root@itfirst src]# redis-cli -h 192.168.186.91 -p 7005
+
+    192.168.186.91:7005> flushdb
+
+    OK
+
+    192.168.186.91:7005> quit
+
+    [root@itfirst src]# redis-trib.rb  create  --replicas  1 192.168.186.91:7000 192.168.186.91:7001 192.168.186.91:7002 192.168.186.91:7003 192.168.186.91:7004 192.168.186.91:7005
+
+    >>> Creating cluster
+
+    >>> Performing hash slots allocation on 6 nodes...
+
+    Using 3 masters:
+
+    192.168.186.91:7000
+
+    192.168.186.91:7001
+
+    192.168.186.91:7002
+
+    Adding replica 192.168.186.91:7003 to 192.168.186.91:7000
+
+    Adding replica 192.168.186.91:7004 to 192.168.186.91:7001
+
+    Adding replica 192.168.186.91:7005 to 192.168.186.91:7002
+
+    M: 61b2b608177374fd0382c872f996a2c25f62daac 192.168.186.91:7000
+
+       slots:0-5460,9189 (5462 slots) master
+
+    M: 50e678c98c31baa4ece1cba096cc34b4545456f3 192.168.186.91:7001
+
+       slots:5461-10922 (5462 slots) master
+
+    M: b8dc855a92d1c9a6e358380286a757011c40601d 192.168.186.91:7002
+
+       slots:9189,10923-16383 (5462 slots) master
+
+    S: 42392d8b4665500b3229b5c5b9dcebed311c9cdf 192.168.186.91:7003
+
+       replicates 61b2b608177374fd0382c872f996a2c25f62daac
+
+    S: 4e8cd9bae1dc0ffa63a3b8315e3f92b0490e65f8 192.168.186.91:7004
+
+       replicates 50e678c98c31baa4ece1cba096cc34b4545456f3
+
+    S: 3344981c3290c39b0d9f427842398c17de835293 192.168.186.91:7005
+
+       replicates b8dc855a92d1c9a6e358380286a757011c40601d
+
+    Can I set the above configuration? (type 'yes' to accept): yes
+
+    /usr/local/rvm/gems/ruby-2.3.0/gems/redis-4.0.1/lib/redis/client.rb:119:in `call': ERR Slot 9189 is already busy (Redis::CommandError)
+
+    from /usr/local/rvm/gems/ruby-2.3.0/gems/redis-4.0.1/lib/redis.rb:2764:in `block in method_missing'
+
+    from /usr/local/rvm/gems/ruby-2.3.0/gems/redis-4.0.1/lib/redis.rb:45:in `block in synchronize'
+
+    from /usr/local/rvm/rubies/ruby-2.3.0/lib/ruby/2.3.0/monitor.rb:214:in `mon_synchronize'
+
+    from /usr/local/rvm/gems/ruby-2.3.0/gems/redis-4.0.1/lib/redis.rb:45:in `synchronize'
+
+    from /usr/local/rvm/gems/ruby-2.3.0/gems/redis-4.0.1/lib/redis.rb:2763:in `method_missing'
+
+    from /usr/local/bin/redis-trib.rb:212:in `flush_node_config'
+
+    from /usr/local/bin/redis-trib.rb:776:in `block in flush_nodes_config'
+
+    from /usr/local/bin/redis-trib.rb:775:in `each'
+
+    from /usr/local/bin/redis-trib.rb:775:in `flush_nodes_config'
+
+    from /usr/local/bin/redis-trib.rb:1296:in `create_cluster_cmd'
+
+    from /usr/local/bin/redis-trib.rb:1696:in `<main>'
+
+
+第三坑
+
+
+    [root@itfirst src]# redis-trib.rb  create  --replicas  1 192.168.186.91:7000 192.168.186.91:7001 192.168.186.91:7002 192.168.186.91:7003 192.168.186.91:7004 192.168.186.91:7005
+
+    >>> Creating cluster
+
+    >>> Performing hash slots allocation on 6 nodes...
+
+    Using 3 masters:
+
+    192.168.186.91:7000
+
+    192.168.186.91:7001
+
+    192.168.186.91:7002
+
+    Adding replica 192.168.186.91:7003 to 192.168.186.91:7000
+
+    Adding replica 192.168.186.91:7004 to 192.168.186.91:7001
+
+    Adding replica 192.168.186.91:7005 to 192.168.186.91:7002
+
+    M: 61b2b608177374fd0382c872f996a2c25f62daac 192.168.186.91:7000
+
+       slots:0-5460,9189 (5462 slots) master
+
+    M: 50e678c98c31baa4ece1cba096cc34b4545456f3 192.168.186.91:7001
+
+       slots:5461-10922 (5462 slots) master
+
+    M: b8dc855a92d1c9a6e358380286a757011c40601d 192.168.186.91:7002
+
+       slots:9189,10923-16383 (5462 slots) master
+
+    S: 42392d8b4665500b3229b5c5b9dcebed311c9cdf 192.168.186.91:7003
+
+       replicates 61b2b608177374fd0382c872f996a2c25f62daac
+
+    S: 4e8cd9bae1dc0ffa63a3b8315e3f92b0490e65f8 192.168.186.91:7004
+
+       replicates 50e678c98c31baa4ece1cba096cc34b4545456f3
+
+    S: 3344981c3290c39b0d9f427842398c17de835293 192.168.186.91:7005
+
+       replicates b8dc855a92d1c9a6e358380286a757011c40601d
+
+    Can I set the above configuration? (type 'yes' to accept): yes
+
+    /usr/local/rvm/gems/ruby-2.3.0/gems/redis-4.0.1/lib/redis/client.rb:119:in `call': ERR Slot 9189 is already busy (Redis::CommandError)
+
+    from /usr/local/rvm/gems/ruby-2.3.0/gems/redis-4.0.1/lib/redis.rb:2764:in `block in method_missing'
+
+    from /usr/local/rvm/gems/ruby-2.3.0/gems/redis-4.0.1/lib/redis.rb:45:in `block in synchronize'
+
+    from /usr/local/rvm/rubies/ruby-2.3.0/lib/ruby/2.3.0/monitor.rb:214:in `mon_synchronize'
+
+    from /usr/local/rvm/gems/ruby-2.3.0/gems/redis-4.0.1/lib/redis.rb:45:in `synchronize'
+
+    from /usr/local/rvm/gems/ruby-2.3.0/gems/redis-4.0.1/lib/redis.rb:2763:in `method_missing'
+
+    from /usr/local/bin/redis-trib.rb:212:in `flush_node_config'
+
+    from /usr/local/bin/redis-trib.rb:776:in `block in flush_nodes_config'
+
+    from /usr/local/bin/redis-trib.rb:775:in `each'
+
+    from /usr/local/bin/redis-trib.rb:775:in `flush_nodes_config'
+
+    from /usr/local/bin/redis-trib.rb:1296:in `create_cluster_cmd'
+
+    from /usr/local/bin/redis-trib.rb:1696:in `<main>'
+
+
+还是度娘靠谱，在《redis 跨机器集群启动出错》博客中找到了答案。
+
+
+这是由于之间创建集群没有成功,需要将nodes.conf和dir里面的文件全部删除。
+
+
+    [root@itfirst 7000]# find / -name "nodes-7000.conf"
+
+    /usr/local/redis-3.2.3/src/nodes-7000.conf
+
+    [root@itfirst 7000]# cd ../../
+
+    [root@itfirst src]# rm -rf nodes-700*
+
+
+然后重启redis服务。
+
+
+    [root@itfirst src]# redis-trib.rb  create  --replicas  1 192.168.186.91:7000 192.168.186.91:7001 192.168.186.91:7002 192.168.186.91:7003 192.168.186.91:7004 192.168.186.91:7005
+
+    >>> Creating cluster
+
+    >>> Performing hash slots allocation on 6 nodes...
+
+    Using 3 masters:
+
+    192.168.186.91:7000
+
+    192.168.186.91:7001
+
+    192.168.186.91:7002
+
+    Adding replica 192.168.186.91:7003 to 192.168.186.91:7000
+
+    Adding replica 192.168.186.91:7004 to 192.168.186.91:7001
+
+    Adding replica 192.168.186.91:7005 to 192.168.186.91:7002
+
+    M: 319da27d8668a15d2d2d02afe433247694343459 192.168.186.91:7000
+
+       slots:0-5460 (5461 slots) master
+
+    M: 3da756265e301ac0210760f13e990473f87a3017 192.168.186.91:7001
+
+       slots:5461-10922 (5462 slots) master
+
+    M: 6f336da48c892d8e0c541a864765978ebfbca6d5 192.168.186.91:7002
+
+       slots:10923-16383 (5461 slots) master
+
+    S: ff4cf9d8a141d85c478b9af0358c93bca342c236 192.168.186.91:7003
+
+       replicates 319da27d8668a15d2d2d02afe433247694343459
+
+    S: 43c2e0d7799e84b449803a68d557c3431e9e047e 192.168.186.91:7004
+
+       replicates 3da756265e301ac0210760f13e990473f87a3017
+
+    S: 3f174fae106cb6cf7e7f21ed844895ed7c18f793 192.168.186.91:7005
+
+       replicates 6f336da48c892d8e0c541a864765978ebfbca6d5
+
+    Can I set the above configuration? (type 'yes' to accept): yes
+
+    >>> Nodes configuration updated
+
+    >>> Assign a different config epoch to each node
+
+    >>> Sending CLUSTER MEET messages to join the cluster
+
+    Waiting for the cluster to join....
+
+    >>> Performing Cluster Check (using node 192.168.186.91:7000)
+
+    M: 319da27d8668a15d2d2d02afe433247694343459 192.168.186.91:7000
+
+       slots:0-5460 (5461 slots) master
+
+    M: 3da756265e301ac0210760f13e990473f87a3017 192.168.186.91:7001
+
+       slots:5461-10922 (5462 slots) master
+
+    M: 6f336da48c892d8e0c541a864765978ebfbca6d5 192.168.186.91:7002
+
+       slots:10923-16383 (5461 slots) master
+
+    M: ff4cf9d8a141d85c478b9af0358c93bca342c236 192.168.186.91:7003
+
+       slots: (0 slots) master
+
+       replicates 319da27d8668a15d2d2d02afe433247694343459
+
+    M: 43c2e0d7799e84b449803a68d557c3431e9e047e 192.168.186.91:7004
+
+       slots: (0 slots) master
+
+       replicates 3da756265e301ac0210760f13e990473f87a3017
+
+    M: 3f174fae106cb6cf7e7f21ed844895ed7c18f793 192.168.186.91:7005
+
+       slots: (0 slots) master
+
+       replicates 6f336da48c892d8e0c541a864765978ebfbca6d5
+
+    [OK] All nodes agree about slots configuration.
+
+    >>> Check for open slots...
+
+    >>> Check slots coverage...
+
+    [OK] All 16384 slots covered.
+
+
+4、验证集群状态
+
+
+登录集群客户端，-c标识以集群方式登录
+
+
+    [root@itfirst src]# redis-cli -h 192.168.186.91 -c -p 7002
+
+
+查看集群状态
+
+
+    192.168.186.91:7002> cluster info
+
+    cluster_state:ok
+
+    cluster_slots_assigned:16384
+
+    cluster_slots_ok:16384
+
+    cluster_slots_pfail:0
+
+    cluster_slots_fail:0
+
+    cluster_known_nodes:6
+
+    cluster_size:3
+
+    cluster_current_epoch:6
+
+    cluster_my_epoch:3
+
+    cluster_stats_messages_sent:124174
+
+    cluster_stats_messages_received:124174
+
+    192.168.186.91:7002> cluster nodes
+
+    319da27d8668a15d2d2d02afe433247694343459 192.168.186.91:7000 master - 0 1519465974307 1 connected 0-5460
+
+    3f174fae106cb6cf7e7f21ed844895ed7c18f793 192.168.186.91:7005 slave 6f336da48c892d8e0c541a864765978ebfbca6d5 0 1519465971278 6 connected
+
+    6f336da48c892d8e0c541a864765978ebfbca6d5 192.168.186.91:7002 myself,master - 0 0 3 connected 10923-16383
+
+    3da756265e301ac0210760f13e990473f87a3017 192.168.186.91:7001 master - 0 1519465972288 2 connected 5461-10922
+
+    43c2e0d7799e84b449803a68d557c3431e9e047e 192.168.186.91:7004 slave 3da756265e301ac0210760f13e990473f87a3017 0 1519465973298 5 connected
+
+    ff4cf9d8a141d85c478b9af0358c93bca342c236 192.168.186.91:7003 slave 319da27d8668a15d2d2d02afe433247694343459 0 1519465969258 4 connected
